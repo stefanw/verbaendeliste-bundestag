@@ -1,5 +1,5 @@
-Bundestagslobby-Extraktor
-=========================
+Verbaendeliste-Bundestag Extractor
+==================================
 
 Use `pdftohtml` to get an XML file from the pdf.
 
@@ -7,6 +7,6 @@ Then use the extractor with first and last relevant page number to convert to pa
 
 	python extract_lobby.py 4 690 < lobbylist.xml > lobbylist.json
 
-Here is an extract file from the 31st of May 2012.
+Here is [extracted JSON (the 30st of May 2012)](http://stefanwehrmeyer.com/projects/verbaendeliste/30052012.json).
 
 License: MIT-License
