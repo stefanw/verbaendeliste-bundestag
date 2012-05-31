@@ -1,6 +1,26 @@
+# -*- coding: utf-8 -*-
 import sys
 import json
+import re
 from xml import sax
+
+rec = lambda x: re.compile(x, re.UNICODE)
+
+TITLES = (
+    rec(u'Dipl?\.\-?[\w\.-]+(?:\s?\(FH\))?'),
+    rec('[a-z]\.habil\.'),
+    rec('(?:Prof\.)?(?:\s?Dr\.(?:\s?[a-z]+\.)?)*(?:-Ing\.)?(?:\s?med.)?(?:\s?h.c.)?'),
+    rec('(?:Chef)?[Aa]potheker(?:in)?'),
+    rec('Weihbischof'),  # ORLY
+    rec('(?:Minister )?a.D.'),
+    rec(u'(?:Ober)?[Bb]ürgermeister(?:in)?'),
+    rec('Steuerberater(?:in)?/?'),
+    rec(u'Fachanw[aä]lt(?:in)? für [\w\.-]+'),
+    rec(u'Wirtschaftsprüfer(?:in)?'),
+    rec(u'vereidigter? Buchprüfer(?:in)?'),
+    rec('RA(?:in)?/?'),
+    rec('^Obermeister(?:in)?'),
+)
 
 
 class LobbyTextContentHandler(sax.ContentHandler):
@@ -8,10 +28,10 @@ class LobbyTextContentHandler(sax.ContentHandler):
     intext = False
     bolded = False
     section = 'undefined'
-    index = 0
     data = None
+    index = 0
     board_kind = None
-    feature_external_ges = False
+    text = ""
 
     def __init__(self, fileout, start=0, end=0):
         self.page_start = start
@@ -24,8 +44,6 @@ class LobbyTextContentHandler(sax.ContentHandler):
                 self.active = True
             if int(attrs['number']) == self.page_end:
                 self.active = False
-            return
-        if not self.active:
             return
         if name == "text" and int(attrs['top']) > 30 and int(attrs['top']) < 1200:
             self.intext = True
@@ -43,10 +61,39 @@ class LobbyTextContentHandler(sax.ContentHandler):
     def endElement(self, name):
         if not self.active:
             return
+        if not self.intext:
+            return
+        text = self.text
         if name == "text":
             self.intext = False
+            self.text = ""
+            if self.is_next_section(text):
+                return
+            stripped = text.strip()
+            if stripped in ('-', u'\u2013',):
+                text = ''
+        getattr(self, 'parse_' + self.section)(text)
         if name == "b":
             self.bolded = False
+            try:
+                temp_index = int(text)
+            except ValueError:
+                pass
+            else:
+                assert temp_index == self.index + 1
+                self.index = temp_index
+                self.flush_data()
+                self.data = {
+                    'index': temp_index,
+                    'locations': [],
+                    'interestarea': [],
+                    'board': [],
+                    'membercount': None,
+                    'organizationcount': None,
+                    'representatives': []
+                }
+                self.section = 'name'
+                return
 
     def is_next_section(self, text):
         if 'V o r s t a n d u n d ' in text:
@@ -70,34 +117,8 @@ class LobbyTextContentHandler(sax.ContentHandler):
         return False
 
     def characters(self, text):
-        if not self.intext:
-            return
-        if self.bolded:
-            try:
-                temp_index = int(text)
-            except ValueError:
-                pass
-            else:
-                assert temp_index == self.index + 1
-                self.flush_data()
-                self.data = {
-                    'index': temp_index,
-                    'locations': [],
-                    'interestarea': [],
-                    'board': [],
-                    'membercount': None,
-                    'organizationcount': None,
-                    'representatives': []
-                }
-                self.index = temp_index
-                self.section = 'name'
-                return
-        if self.is_next_section(text):
-            return
-        stripped = text.strip()
-        if stripped in ('-', u'\u2013', '"', ')', ') und',):
-            text = ''
-        getattr(self, 'parse_' + self.section)(text)
+        if self.active and self.intext and text.strip():
+            self.text += text
 
     def endDocument(self):
         self.flush_data(True)
@@ -148,6 +169,34 @@ class LobbyTextContentHandler(sax.ContentHandler):
             return
         self.data['locations'][-1]['address'].append(text)
 
+    def get_titles(self, name):
+        titles = []
+        new_name = name
+        for title in TITLES:
+            matches = title.findall(new_name)
+            for match in matches:
+                if not match.strip():
+                    continue
+                try:
+                    index = name.index(match)
+                except ValueError:
+                    print name
+                    print match
+                    print new_name
+                    raise
+                new_name = new_name.replace(match, '', 1)
+                titles.append((index, match.strip()))
+        if titles:
+            titles.sort(key=lambda x: x[0])
+            titles = ' '.join([x[1] for x in titles])
+            titles = titles.replace('/ ', '/')
+        else:
+            titles = None
+        new_name = new_name.strip()
+        if not new_name:
+            new_name = name.strip()
+        return titles, new_name
+
     def parse_board(self, text):
         if not self.data['board']:
             self.data['board'] = []
@@ -156,11 +205,14 @@ class LobbyTextContentHandler(sax.ContentHandler):
             return
         parts = text.rsplit(',', 1)
         if len(parts) > 1:
-            self.data['board'].append((parts[0].strip(), parts[1].strip()))
-        elif self.board_kind is not None:
-            self.data['board'].append((text.strip(), self.board_kind))
+            titles, name = self.get_titles(parts[0].strip())
+            self.data['board'].append((titles, name, parts[1].strip()))
         else:
-            self.data['board'].append((text.strip(), None))
+            titles, name = self.get_titles(text.strip())
+            if self.board_kind is not None:
+                self.data['board'].append((titles, name, self.board_kind))
+            else:
+                self.data['board'].append((titles, name, None))
 
     def parse_interestarea(self, text):
         self.board_kind = None
@@ -191,13 +243,14 @@ class LobbyTextContentHandler(sax.ContentHandler):
         if 'Vorstand und Gesch' in text:
             self.data['representatives'].append('@board')
             return
-        if '(s. Abschnitt' in text:
-            return
         if not text:
             return
-        self.data['representatives'].append(text.strip())
+        title, name = self.get_titles(text.strip())
+        self.data['representatives'].append((title, name))
 
     def parse_parliamentaddress(self, text):
+        if self.bolded:
+            return
         if not 'parliament' in self.data['locations'][-1]:
             self.data['locations'].append({'address': [], 'parliament': True})
         if 'Name und Sitz, 1. Adresse' in text:
@@ -205,8 +258,6 @@ class LobbyTextContentHandler(sax.ContentHandler):
             return
         if 'Vorstand und Gesch' in text:
             self.data['locations'][-1]['address'].append('@board')
-            return
-        if '(s. Abschnitt' in text:
             return
         self.parse_address(text)
 
@@ -224,8 +275,8 @@ def main(filein, fileout, start, end):
 if __name__ == '__main__':
     start = 4
     end = 690
-    if len(sys.argv) == 2:
+    if len(sys.argv) > 1:
         start = int(sys.argv[1])
-    if len(sys.argv) == 3:
-        start = int(sys.argv[2])
+    if len(sys.argv) > 2:
+        end = int(sys.argv[2])
     main(sys.stdin, sys.stdout, start, end)
