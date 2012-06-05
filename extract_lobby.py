@@ -8,8 +8,8 @@ rec = lambda x: re.compile(x, re.UNICODE)
 
 TITLES = (
     rec(u'Dipl?\.\-?[\w\.-]+(?:\s?\(FH\))?'),
-    rec('[a-z]\.habil\.'),
-    rec('(?:Prof\.)?(?:\s?Dr\.(?:\s?[a-z]+\.)?)*(?:-Ing\.)?(?:\s?med.)?(?:\s?h.c.)?'),
+    rec('[a-z]+\.habil\.'),
+    rec('(?:Prof\.)?(?:\s?Dr\.(?:\s?h\.c\.)?(?:\s?[a-z]+\.)?)*(?:-Ing\.)?(?:\s?med\.)?'),
     rec('(?:Chef)?[Aa]potheker(?:in)?'),
     rec('Weihbischof'),  # ORLY
     rec('(?:Minister )?a.D.'),
