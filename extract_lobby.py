@@ -20,6 +20,7 @@ TITLES = (
     rec(u'vereidigter? Buchprüfer(?:in)?'),
     rec('RA(?:in)?/?'),
     rec('^Obermeister(?:in)?'),
+    rec('M\.A\.(?:\([^\)]+\))?'),
 )
 
 
