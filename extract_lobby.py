@@ -64,7 +64,7 @@ class LobbyTextContentHandler(sax.ContentHandler):
         if name == "page":
             if int(attrs['number']) == self.page_start:
                 self.active = True
-            if int(attrs['number']) == self.page_end:
+            if self.page_end is not None and int(attrs['number']) > self.page_end:
                 self.active = False
             return
         if name == "text" and int(attrs['top']) > 30 and int(attrs['top']) < 1200:
@@ -89,6 +89,9 @@ class LobbyTextContentHandler(sax.ContentHandler):
             return
         text = self.text
         if name == "text":
+            if text == 'Stichwortverzeichnis':
+                self.active = False
+                return
             try:
                 if not (self.section == 'parliamentaddress' or
                         self.section == 'undefined'):
@@ -311,7 +314,7 @@ def main(filein, fileout, start, end):
 
 if __name__ == '__main__':
     start = 4
-    end = 688
+    end = None
     if len(sys.argv) > 1:
         start = int(sys.argv[1])
     if len(sys.argv) > 2:
