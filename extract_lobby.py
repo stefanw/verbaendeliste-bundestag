@@ -2,7 +2,7 @@
 import sys
 import json
 import re
-from xml import sax
+from lxml import etree as ET
 from StringIO import StringIO
 
 rec = lambda x: re.compile(x, re.UNICODE)
@@ -24,10 +24,10 @@ TITLES = (
     rec('M\.A\.(?:\([^\)]+\))?'),
 )
 
-ADDRESS_START = rec(u'\s\d+[a-z]?$|^\s*Geschäftsstelle:?\s*$')
+ADDRESS_START = rec(ur'(\d[\d/-]*\s*[A-Za-z]?|[Gg]eschäftsstelle:?\s*$|[hH]aus\)?\s*$|^Haus\s+|@|http://)')
 
 
-class LobbyTextContentHandler(sax.ContentHandler):
+class LobbyTextContentHandler(object):
     active = False
     intext = False
     bolded = False
@@ -55,10 +55,10 @@ class LobbyTextContentHandler(sax.ContentHandler):
         # PARLIAMENT_ADDRESS = 'A n s c h r i f t a m S i t z v o n B T u n d B R'
         PARLIAMENT_ADDRESS = 'Anschrift am Sitz von BT und BRg'
 
-    def __init__(self, fileout, start=0, end=0):
+    def __init__(self, generator, start=0, end=0):
         self.page_start = start
         self.page_end = end
-        self.fileout = fileout
+        self.generator = generator
 
     def startElement(self, name, attrs):
         if name == "page":
@@ -170,10 +170,7 @@ class LobbyTextContentHandler(sax.ContentHandler):
                 continue
             newlocs.append(loc)
         self.data['locations'] = newlocs
-
-        self.fileout.write(json.dumps(self.data, sort_keys=True, indent=4))
-        if not last:
-            self.fileout.write(',')
+        self.generator.send(self.data)
 
     def parse_undefined(self, text):
         pass
@@ -190,7 +187,7 @@ class LobbyTextContentHandler(sax.ContentHandler):
         if not text:
             return
         if not ADDRESS_START.search(text) and not self.data['locations'][0]['address']:
-            # If line doesn't end in house number and
+            # If line doesn't look like an address string and
             # no address has been parsed yet, it's still part of the name
             return self.parse_name(text)
 
@@ -222,9 +219,6 @@ class LobbyTextContentHandler(sax.ContentHandler):
                 try:
                     index = name.index(match)
                 except ValueError:
-                    print name
-                    print match
-                    print new_name
                     raise
                 new_name = new_name.replace(match, '', 1)
                 titles.append((index, match.strip()))
@@ -302,13 +296,48 @@ class LobbyTextContentHandler(sax.ContentHandler):
         self.parse_address(text)
 
 
+def get_organisations(filein, start=4, end=None):
+    class accumulator:
+        def __init__(self):
+            self.container = []
+
+        def send(self, obj):
+            self.container.append(obj)
+
+        def get_values(self):
+            for o in self.container:
+                yield o
+            self.container = []
+
+    generator = accumulator()
+    handler = LobbyTextContentHandler(generator, start=start, end=end)
+
+    fixed_filein = StringIO(filein.read().replace('<A ', '<a '))
+
+    for ev, element in ET.iterparse(fixed_filein, events=['start', 'end']):
+        if ev == 'start':
+            handler.startElement(element.tag, element.attrib)
+        elif ev == 'end':
+            handler.characters(element.text or '')
+            handler.endElement(element.tag)
+        for val in generator.get_values():
+            yield val
+
+    handler.endDocument()
+    for val in generator.get_values():
+        yield val
+
+
 def main(filein, fileout, start, end):
     fileout.write('[')
-    parser = sax.make_parser()
-    handler = LobbyTextContentHandler(fileout, start=start, end=end)
-    parser.setFeature(sax.handler.feature_external_ges, False)
-    parser.setContentHandler(handler)
-    parser.parse(StringIO(filein.read().replace('<A ', '<a ')))
+    first = True
+    for org in get_organisations(filein, start, end):
+        if first:
+            first = False
+        else:
+            fileout.write(',')
+        fileout.write(json.dumps(org, sort_keys=True, indent=4))
+
     fileout.write(']')
 
 
