@@ -2,7 +2,11 @@
 import sys
 import json
 import re
-from lxml import etree as ET
+try:
+    from lxml import etree as ET
+except ImportError:
+    from xml.etree import ElementTree as ET
+
 from StringIO import StringIO
 
 rec = lambda x: re.compile(x, re.UNICODE)
